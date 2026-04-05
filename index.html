@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="manifest" href="manifest.json">
+    <meta charset="UTF-8">
+    <title>Life Commander | External Brain</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --urgent: #ef4444; --soon: #f59e0b; --later: #10b981; --accent: #3b82f6; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        
+        /* THE BRAIN DUMP - For immediate thoughts */
+        .brain-dump { background: #334155; padding: 20px; border-radius: 12px; margin-bottom: 25px; border: 2px dashed var(--accent); }
+        .brain-dump h3 { margin: 0 0 10px 0; color: var(--accent); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+        .dump-input { width: 100%; background: transparent; border: none; border-bottom: 2px solid #475569; color: white; font-size: 1.2rem; padding: 5px 0; outline: none; }
+        .dump-input:focus { border-color: var(--accent); }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+        .card { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        
+        /* Priority Styling */
+        .task { background: #334155; padding: 12px; margin-bottom: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .p-high { border-left: 5px solid var(--urgent); box-shadow: 0 0 10px rgba(239, 68, 68, 0.2); }
+        .p-med { border-left: 5px solid var(--soon); }
+        .p-low { border-left: 5px solid var(--later); }
+
+        input, select, textarea { width: 100%; background: #0f172a; border: 1px solid #334155; color: white; padding: 10px; margin-bottom: 10px; border-radius: 6px; }
+        button { background: var(--accent); border: none; color: white; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%; }
+        button.secondary { background: #475569; margin-top: 5px; }
+        .done { opacity: 0.3; filter: grayscale(1); }
+    </style>
+</head>
+<body>
+
+    <div class="brain-dump">
+        <h3>🧠 Don't Forget This:</h3>
+        <input type="text" id="quickThought" class="dump-input" placeholder="Type it here and hit Enter..." onkeypress="if(event.key==='Enter') saveThought()">
+        <p id="currentThought" style="margin-top: 10px; font-weight: bold; color: #fff;"></p>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h2>📅 Today's Timeline</h2>
+            <input type="time" id="timeInput">
+            <input type="text" id="eventInput" placeholder="What's happening?">
+            <button onclick="addEvent()">Add to Schedule</button>
+            <div id="scheduleList" style="margin-top:20px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>✅ To-Do List</h2>
+            <select id="priorityInput">
+                <option value="high">High Priority (Do First)</option>
+                <option value="med" selected>Medium Priority</option>
+                <option value="low">Low Priority</option>
+            </select>
+            <input type="text" id="taskInput" placeholder="Task description...">
+            <button onclick="addTask()">Add Task</button>
+            <div id="taskList" style="margin-top:20px;"></div>
+        </div>
+
+        <div class="card">
+            <h2>📝 Life Plans & Notes</h2>
+            <textarea id="notesInput" rows="18" placeholder="Long term goals, grocery lists, or random ideas..." oninput="saveNotes()"></textarea>
+            <button class="secondary" onclick="clearAllData()" style="background:#ef4444">Clear Everything</button>
+        </div>
+    </div>
+
+<script>
+    // Add this at the very top of your existing <script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+}
+    // Load data when page opens
+    window.onload = () => {
+        renderSchedule();
+        renderTasks();
+        document.getElementById('currentThought').innerText = localStorage.getItem('thought') || "";
+        document.getElementById('notesInput').value = localStorage.getItem('notes') || "";
+        
+        // Notification permission
+        if (Notification.permission !== "granted") Notification.requestPermission();
+        
+        // Start the reminder clock
+        setInterval(checkReminders, 30000); 
+    };
+
+    function saveThought() {
+        const val = document.getElementById('quickThought').value;
+        localStorage.setItem('thought', val);
+        document.getElementById('currentThought').innerText = val;
+        document.getElementById('quickThought').value = "";
+    }
+
+    function addTask() {
+        const tasks = JSON.parse(localStorage.getItem('tasks') || "[]");
+        tasks.push({
+            id: Date.now(),
+            text: document.getElementById('taskInput').value,
+            priority: document.getElementById('priorityInput').value,
+            done: false
+        });
+        localStorage.setItem('tasks', JSON.stringify(tasks));
+        document.getElementById('taskInput').value = "";
+        renderTasks();
+    }
+
+    function addEvent() {
+        const events = JSON.parse(localStorage.getItem('events') || "[]");
+        events.push({
+            id: Date.now(),
+            time: document.getElementById('timeInput').value,
+            text: document.getElementById('eventInput').value,
+            notified: false
+        });
+        localStorage.setItem('events', JSON.stringify(events));
+        renderSchedule();
+    }
+
+    function renderTasks() {
+        const list = document.getElementById('taskList');
+        const tasks = JSON.parse(localStorage.getItem('tasks') || "[]");
+        // Sort: High priority first
+        tasks.sort((a,b) => (a.priority === 'high' ? -1 : 1));
+        
+        list.innerHTML = tasks.map(t => `
+            <div class="task p-${t.priority} ${t.done ? 'done' : ''}">
+                <span>${t.text}</span>
+                <div>
+                    <button onclick="toggleTask(${t.id})" style="width:auto; padding:5px;">Check</button>
+                    <button onclick="deleteItem('tasks', ${t.id})" style="width:auto; padding:5px; background:red;">X</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function renderSchedule() {
+        const list = document.getElementById('scheduleList');
+        const events = JSON.parse(localStorage.getItem('events') || "[]");
+        events.sort((a,b) => a.time.localeCompare(b.time));
+        
+        list.innerHTML = events.map(e => `
+            <div class="task" style="border-left: 5px solid var(--accent)">
+                <span><strong>${e.time}</strong> - ${e.text}</span>
+                <button onclick="deleteItem('events', ${e.id})" style="width:auto; padding:5px; background:red;">X</button>
+            </div>
+        `).join('');
+    }
+
+    function toggleTask(id) {
+        let tasks = JSON.parse(localStorage.getItem('tasks'));
+        tasks = tasks.map(t => t.id === id ? {...t, done: !t.done} : t);
+        localStorage.setItem('tasks', JSON.stringify(tasks));
+        renderTasks();
+    }
+
+    function deleteItem(key, id) {
+        let items = JSON.parse(localStorage.getItem(key));
+        items = items.filter(i => i.id !== id);
+        localStorage.setItem(key, JSON.stringify(items));
+        key === 'tasks' ? renderTasks() : renderSchedule();
+    }
+
+    function saveNotes() {
+        localStorage.setItem('notes', document.getElementById('notesInput').value);
+    }
+
+    function checkReminders() {
+        const now = new Date();
+        const time = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+        const events = JSON.parse(localStorage.getItem('events') || "[]");
+        
+        events.forEach(e => {
+            if (e.time === time && !e.notified) {
+                new Notification("LIFE COMMANDER", { body: `Time for: ${e.text}` });
+                e.notified = true; // Don't notify twice in the same minute
+            }
+        });
+        localStorage.setItem('events', JSON.stringify(events));
+    }
+
+    function clearAllData() {
+        if(confirm("Are you sure? This resets your entire day.")) {
+            localStorage.clear();
+            location.reload();
+        }
+    }
+</script>
+</body>
+</html>
